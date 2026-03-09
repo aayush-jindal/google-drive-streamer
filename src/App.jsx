@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from './hooks/useAuth.js';
+import { useDevice } from './hooks/useDevice.js';
 import PasswordScreen from './components/PasswordScreen.jsx';
 import FileBrowser from './components/FileBrowser.jsx';
 import VideoPlayer from './components/VideoPlayer.jsx';
@@ -8,6 +9,7 @@ import LoadingSpinner from './components/LoadingSpinner.jsx';
 export default function App() {
   const { authenticated, loading, login } = useAuth();
   const [currentVideo, setCurrentVideo] = useState(null);
+  const { isPhone, isTVDevice } = useDevice();
 
   if (loading) {
     return (
@@ -23,18 +25,21 @@ export default function App() {
 
   return (
     <>
-      {/* Keep FileBrowser mounted at all times so folder navigation state
-          (breadcrumbs, scroll position, file list) survives video playback. */}
-      {/* active={false} disables FileBrowser's keyboard handler while a
-          video is playing, preventing double-handling of arrow keys. */}
+      {/* Keep FileBrowser mounted so folder navigation state survives video playback. */}
       <div style={currentVideo ? { display: 'none' } : undefined}>
-        <FileBrowser onPlayVideo={setCurrentVideo} active={!currentVideo} />
+        <FileBrowser
+          onPlayVideo={setCurrentVideo}
+          active={!currentVideo}
+          isTVDevice={isTVDevice}
+          isPhone={isPhone}
+        />
       </div>
 
       {currentVideo && (
         <VideoPlayer
           file={currentVideo}
           onBack={() => setCurrentVideo(null)}
+          isTVDevice={isTVDevice}
         />
       )}
     </>

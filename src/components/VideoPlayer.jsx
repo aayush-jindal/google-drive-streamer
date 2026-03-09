@@ -10,7 +10,7 @@ function formatTime(secs) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export default function VideoPlayer({ file, onBack }) {
+export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
   const videoRef = useRef(null);
   const playerRef = useRef(null);
   const controlsTimerRef = useRef(null);
@@ -21,19 +21,20 @@ export default function VideoPlayer({ file, onBack }) {
   const [buffering, setBuffering] = useState(true);
   const [showControls, setShowControls] = useState(true);
   const [videoError, setVideoError] = useState(null);
+  const [seekHint, setSeekHint] = useState(null); // { label: string } | null
+  const seekHintTimerRef = useRef(null);
 
-  // The proxy at /api/stream-video handles auth server-side and relays only
-  // the exact byte range the browser requests — typically 1-2 MB per call.
-  // The browser drives all seeking and buffering natively via Range requests.
+  const isPhone = !isTVDevice;
+
   const videoSrc = `/api/stream-video?fileId=${encodeURIComponent(file.id)}`;
 
-  // Focus the player container on mount so the Fire Stick browser routes
-  // all remote key events here immediately, without needing a click first.
+  // TV: focus the player container immediately so d-pad events arrive here.
+  // Phone: don't steal focus — the native video controls manage themselves.
   useEffect(() => {
-    playerRef.current?.focus();
-  }, []);
+    if (isTVDevice) playerRef.current?.focus();
+  }, [isTVDevice]);
 
-  // ── Wake lock — prevent screen saver during playback ─────────────────────
+  // Wake lock — prevent screen saver on both TV and phone.
   useEffect(() => {
     let lock = null;
     if ('wakeLock' in navigator) {
@@ -42,14 +43,25 @@ export default function VideoPlayer({ file, onBack }) {
     return () => lock?.release();
   }, []);
 
-  // ── Controls auto-hide ────────────────────────────────────────────────────
+  // Phone: push a history entry when the player opens so the Android hardware
+  // back button (which fires popstate, not keydown) closes the player.
+  useEffect(() => {
+    if (!isPhone) return;
+    window.history.pushState({ videoPlaying: true }, '');
+    const onPop = () => onBack();
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [isPhone, onBack]);
+
+  // ── Controls auto-hide (TV only) ──────────────────────────────────────────
   const revealControls = useCallback(() => {
     setShowControls(true);
     clearTimeout(controlsTimerRef.current);
-    controlsTimerRef.current = setTimeout(() => setShowControls(false), 4000);
+    controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000);
   }, []);
 
   useEffect(() => {
+    if (!isTVDevice) return;
     revealControls();
     return () => clearTimeout(controlsTimerRef.current);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -74,9 +86,6 @@ export default function VideoPlayer({ file, onBack }) {
         const code = v.error?.code;
         const ext = file.name.split('.').pop().toUpperCase();
         if (code === 4) {
-          // MEDIA_ERR_SRC_NOT_SUPPORTED fires both when the source URL returns
-          // a non-video response (auth error, redirect) AND when the codec is
-          // truly unsupported. Check the proxy logs for the real cause.
           setVideoError(
             `Could not play ${ext} file. ` +
             `If the file is H.265/HEVC or .mov, try converting it to MP4 (H.264). ` +
@@ -92,9 +101,9 @@ export default function VideoPlayer({ file, onBack }) {
 
     Object.entries(handlers).forEach(([evt, fn]) => v.addEventListener(evt, fn));
     return () => Object.entries(handlers).forEach(([evt, fn]) => v.removeEventListener(evt, fn));
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Playback controls ─────────────────────────────────────────────────────
+  // ── Playback controls (TV) ────────────────────────────────────────────────
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -107,10 +116,27 @@ export default function VideoPlayer({ file, onBack }) {
     if (!v) return;
     v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + delta));
     revealControls();
+
+    // Flash a seek indicator centred on screen so the user can see how far
+    // they jumped. Clears and restarts if the user seeks again quickly.
+    clearTimeout(seekHintTimerRef.current);
+    setSeekHint({ label: delta > 0 ? `⏩  +${delta}s` : `⏪  ${delta}s` });
+    seekHintTimerRef.current = setTimeout(() => setSeekHint(null), 900);
   }, [revealControls]);
 
-  // ── Keyboard / remote ─────────────────────────────────────────────────────
+  // ── Keyboard / d-pad (TV only) ────────────────────────────────────────────
+  // Focus is trapped here while the player is mounted:
+  //   • FileBrowser's keyboard handler is disabled via active=false in App.jsx
+  //   • All remote keys are consumed here and never bubble further
+  //
+  // Fire Stick Silk key-name notes
+  // ──────────────────────────────
+  //   Play/Pause  → e.key 'MediaPlayPause'  | keyCode 179
+  //   Fast Fwd    → e.key 'FastFwd'         | keyCode 228  (NOT 'MediaFastForward')
+  //   Rewind      → e.key 'Rewind'          | keyCode 227  (NOT 'MediaRewind')
+  //   Older Silk versions may report e.key = 'Unidentified', rely on keyCode.
   useEffect(() => {
+    if (!isTVDevice) return;
     const onKey = (e) => {
       switch (e.key) {
         case ' ':
@@ -139,29 +165,78 @@ export default function VideoPlayer({ file, onBack }) {
           e.preventDefault();
           onBack();
           break;
-        // ── Fire Stick dedicated media buttons ──────────────────────────
+        // Play/Pause — W3C name + keyCode 179
         case 'MediaPlayPause':
           e.preventDefault();
           togglePlay();
           break;
+        // Fast-forward — W3C name AND Fire Stick Silk name
         case 'MediaFastForward':
+        case 'FastFwd':
           e.preventDefault();
           seek(30);
           break;
+        // Rewind — W3C name AND Fire Stick Silk name
         case 'MediaRewind':
+        case 'Rewind':
           e.preventDefault();
           seek(-30);
           break;
         default:
-          revealControls();
+          // Fallback for older Silk that reports e.key = 'Unidentified'
+          // eslint-disable-next-line no-fallthrough
+          if (e.keyCode === 179) { e.preventDefault(); togglePlay(); }
+          else if (e.keyCode === 228) { e.preventDefault(); seek(30); }
+          else if (e.keyCode === 227) { e.preventDefault(); seek(-30); }
+          else { revealControls(); }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePlay, seek, onBack, revealControls]);
+  }, [isTVDevice, togglePlay, seek, onBack, revealControls]);
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
+  // ── Phone layout ──────────────────────────────────────────────────────────
+  // Uses the browser's built-in video controls (scrubber, play/pause, full-screen).
+  // A floating back button is always visible so users can exit without needing
+  // the remote — the hardware back button is handled via popstate (see above).
+  if (isPhone) {
+    return (
+      <div className="player player--phone">
+        <button className="player__phone-back" onClick={onBack}>
+          ← Back
+        </button>
+
+        <video
+          ref={videoRef}
+          src={videoSrc}
+          className="player__video"
+          autoPlay
+          playsInline
+          preload="auto"
+          controls
+        />
+
+        {/* Buffering spinner — shown until the browser has enough data to play */}
+        {buffering && !videoError && (
+          <div className="player__overlay">
+            <LoadingSpinner />
+          </div>
+        )}
+
+        {videoError && (
+          <div className="player__overlay player__overlay--error" onClick={(e) => e.stopPropagation()}>
+            <p className="player__error-msg">{videoError}</p>
+            <button className="btn btn-primary" onClick={onBack}>← Back</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── TV layout ─────────────────────────────────────────────────────────────
+  // Full custom controls: click-to-pause, seek bar, time readout, auto-hide.
   return (
     <div
       ref={playerRef}
@@ -190,6 +265,13 @@ export default function VideoPlayer({ file, onBack }) {
         <div className="player__overlay player__overlay--error" onClick={(e) => e.stopPropagation()}>
           <p className="player__error-msg">{videoError}</p>
           <button className="btn btn-primary" onClick={onBack}>← Back</button>
+        </div>
+      )}
+
+      {/* Seek flash — centred on screen, auto-fades after ~900 ms */}
+      {seekHint && (
+        <div key={seekHint.label} className="player__seek-hint">
+          {seekHint.label}
         </div>
       )}
 
