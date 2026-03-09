@@ -59,6 +59,9 @@ export default function VideoPlayer({ file, onBack }) {
     const v = videoRef.current;
     if (!v) return;
 
+    // Signal to the browser that we want eager buffering at normal speed.
+    v.defaultPlaybackRate = 1.0;
+
     const handlers = {
       play: () => setPlaying(true),
       pause: () => setPlaying(false),
@@ -174,6 +177,7 @@ export default function VideoPlayer({ file, onBack }) {
         className="player__video"
         autoPlay
         playsInline
+        preload="auto"
       />
 
       {buffering && !videoError && (
