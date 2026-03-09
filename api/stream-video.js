@@ -234,10 +234,7 @@ export default async function handler(req, res) {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Keep-Alive', 'timeout=30');
     res.setHeader('X-Accel-Buffering', 'no');  // disable Vercel edge buffering
-    // private: browser may cache; CDN must not.
-    // max-age=300: chunk survives in browser cache long enough for the prefetch
-    // video element to prime it before the main player reaches that byte range.
-    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.setHeader('Cache-Control', 'no-store');
 
     const contentRange = driveRes.headers.get('content-range');
     const contentLength = driveRes.headers.get('content-length');

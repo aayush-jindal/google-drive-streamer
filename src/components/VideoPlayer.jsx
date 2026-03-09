@@ -30,9 +30,6 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
   const backPressRef  = useRef(0);
   const backTimerRef  = useRef(null);
 
-  // Hidden video element kept 60 s ahead of main playback for prefetching.
-  const prefetchRef = useRef(null);
-
   const isPhone = !isTVDevice;
 
   const videoSrc = `/api/stream-video?fileId=${encodeURIComponent(file.id)}`;
@@ -141,147 +138,6 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
       video.removeEventListener('progress', onProgress);
     };
   }, []);
-
-  // ── Prefetch: keep a hidden video 60 s ahead of main playback ───────────────
-  //
-  // A hidden, muted <video> element is kept 60 s ahead of the main player.
-  // This causes the browser to fetch and buffer the NEXT 40 MB chunk well
-  // before the main player reaches the chunk boundary, eliminating the stall
-  // that would otherwise occur while waiting for the next range response.
-  //
-  // Seek recovery: when the user seeks, the prefetch element is silenced
-  // immediately (isSeeking = true, src cleared) so the main player gets all
-  // available bandwidth for seek recovery.  The prefetch is not restarted
-  // until the main player has buffered at least 20 s ahead of the new
-  // position, polled every 2 s via waitForBuffer.
-  //
-  // Caching: stream-video.js returns Cache-Control: private, max-age=300 so
-  // the browser can serve the same byte range to the main player from its
-  // own cache when it catches up, rather than re-fetching from the server.
-  //
-  // play()+pause() is used because some browsers only issue range requests
-  // when the element is in a "wants to play" state.  The 'playing' listener
-  // immediately pauses so no audio leaks (muted is also set on the element).
-  useEffect(() => {
-    const main = videoRef.current;
-    const prefetch = prefetchRef.current;
-    if (!main || !prefetch) return;
-
-    let started = false;
-    let isSeeking = false;
-    let waitTimer = null;
-
-    // Seconds buffered in the main player ahead of its current position.
-    const getBufferedAhead = (video) => {
-      for (let i = 0; i < video.buffered.length; i++) {
-        if (
-          video.buffered.start(i) <= video.currentTime &&
-          video.buffered.end(i)   >= video.currentTime
-        ) {
-          return video.buffered.end(i) - video.currentTime;
-        }
-      }
-      return 0;
-    };
-
-    const syncPrefetch = () => {
-      if (isSeeking || !started || !main.duration || main.duration === Infinity) return;
-      const target = Math.min(main.currentTime + 60, main.duration - 1);
-
-      // No-op if the main player's own buffer already covers this position.
-      for (let i = 0; i < main.buffered.length; i++) {
-        if (main.buffered.start(i) <= target && main.buffered.end(i) >= target) return;
-      }
-
-      if (Math.abs(prefetch.currentTime - target) > 10) {
-        console.log(
-          '[prefetch] seeking to', target.toFixed(1), 's',
-          '(main at', main.currentTime.toFixed(1), 's)',
-        );
-        prefetch.currentTime = target;
-        prefetch.play().catch(() => {});
-      }
-    };
-
-    const stopPrefetch = () => {
-      prefetch.pause();
-      prefetch.removeAttribute('src');
-      prefetch.load();
-    };
-
-    // Re-enable prefetch: clears the seeking guard, assigns src, and syncs
-    // the hidden element to 60 s ahead of the main player's current position.
-    // syncPrefetch is deferred until loadedmetadata so the element is out of
-    // HAVE_NOTHING state and the currentTime seek is guaranteed to take effect.
-    const restartPrefetch = () => {
-      isSeeking = false;
-      prefetch.src = videoSrc;
-      const onMeta = () => {
-        prefetch.removeEventListener('loadedmetadata', onMeta);
-        syncPrefetch();
-      };
-      prefetch.addEventListener('loadedmetadata', onMeta);
-      prefetch.load();
-    };
-
-    // Poll every 2 s until the main player has 20 s of buffer ahead.
-    // Only then re-enable the prefetch so it doesn't compete with recovery.
-    // Capped at 30 attempts (60 s) so a paused-after-seek video doesn't loop forever.
-    const waitForBuffer = (attempt = 0) => {
-      const ahead = getBufferedAhead(main);
-      if (ahead > 20) {
-        console.log('[prefetch] main buffered', ahead.toFixed(1), 's — restarting prefetch');
-        restartPrefetch();
-      } else if (attempt < 30) {
-        waitTimer = setTimeout(() => waitForBuffer(attempt + 1), 2000);
-      }
-    };
-
-    // Assign src only after main video starts playing to avoid
-    // a duplicate metadata request competing with initial load.
-    const onFirstPlaying = () => {
-      if (started) return;
-      started = true;
-      main.removeEventListener('playing', onFirstPlaying);
-      prefetch.src = videoSrc;
-      prefetch.load();
-    };
-
-    // Seek start — give main player 100% bandwidth immediately.
-    const onMainSeeking = () => {
-      isSeeking = true;
-      clearTimeout(waitTimer);
-      stopPrefetch();
-      console.log('[prefetch] paused — seek in progress');
-    };
-
-    // Seek complete — wait for main player to rebuild its buffer first.
-    const onMainSeeked = () => {
-      clearTimeout(waitTimer);
-      waitForBuffer();
-    };
-
-    // Immediately pause whenever the prefetch element starts playing.
-    const onPrefetchPlaying = () => prefetch.pause();
-
-    main.addEventListener('playing', onFirstPlaying);
-    main.addEventListener('seeking', onMainSeeking);
-    main.addEventListener('seeked', onMainSeeked);
-    prefetch.addEventListener('playing', onPrefetchPlaying);
-    const interval = setInterval(syncPrefetch, 5000);
-
-    return () => {
-      clearInterval(interval);
-      clearTimeout(waitTimer);
-      main.removeEventListener('playing', onFirstPlaying);
-      main.removeEventListener('seeking', onMainSeeking);
-      main.removeEventListener('seeked', onMainSeeked);
-      prefetch.removeEventListener('playing', onPrefetchPlaying);
-      prefetch.pause();
-      prefetch.removeAttribute('src');
-      prefetch.load();
-    };
-  }, [videoSrc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Clean up back-press timer on unmount.
   useEffect(() => () => clearTimeout(backTimerRef.current), []);
@@ -408,9 +264,6 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
           controls
         />
 
-        {/* Hidden prefetch element — src assigned by useEffect after first play */}
-        <video ref={prefetchRef} muted preload="auto" style={{ display: 'none' }} />
-
         {/* Buffering spinner — shown until the browser has enough data to play */}
         {buffering && !videoError && (
           <div className="player__overlay">
@@ -447,9 +300,6 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
         playsInline
         preload="auto"
       />
-
-      {/* Hidden prefetch element — src assigned by useEffect after first play */}
-      <video ref={prefetchRef} muted preload="auto" style={{ display: 'none' }} />
 
       {buffering && !videoError && (
         <div className="player__overlay">
