@@ -124,10 +124,10 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
     seekHintTimerRef.current = setTimeout(() => setSeekHint(null), 900);
   }, [revealControls]);
 
-  // ── Keyboard / d-pad (TV only) ────────────────────────────────────────────
-  // Focus is trapped here while the player is mounted:
-  //   • FileBrowser's keyboard handler is disabled via active=false in App.jsx
-  //   • All remote keys are consumed here and never bubble further
+  // ── Keyboard handler (TV only) ────────────────────────────────────────────
+  // Arrow keys are intentionally NOT handled here — in Silk Browser, arrow
+  // keys move the on-screen cursor, so intercepting them would break cursor
+  // movement. All seeking is done via the dedicated media buttons instead.
   //
   // Fire Stick Silk key-name notes
   // ──────────────────────────────
@@ -139,33 +139,19 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
     if (!isTVDevice) return;
     const onKey = (e) => {
       switch (e.key) {
+        // Select / OK button → play/pause
         case ' ':
         case 'Enter':
           e.preventDefault();
           togglePlay();
           break;
-        case 'ArrowLeft':
-          e.preventDefault();
-          seek(-10);
-          break;
-        case 'ArrowRight':
-          e.preventDefault();
-          seek(10);
-          break;
-        case 'ArrowUp':
-          e.preventDefault();
-          seek(30);
-          break;
-        case 'ArrowDown':
-          e.preventDefault();
-          seek(-30);
-          break;
+        // Back button → exit player
         case 'Escape':
         case 'Backspace':
           e.preventDefault();
           onBack();
           break;
-        // Play/Pause — W3C name + keyCode 179
+        // Play/Pause media key — W3C name + keyCode 179
         case 'MediaPlayPause':
           e.preventDefault();
           togglePlay();
@@ -244,7 +230,7 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
       tabIndex={0}
       onClick={togglePlay}
       onMouseMove={revealControls}
-      style={{ cursor: showControls ? 'default' : 'none', outline: 'none' }}
+      style={{ cursor: 'default', outline: 'none' }}
     >
       <video
         ref={videoRef}
@@ -314,7 +300,7 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
             </span>
 
             <span className="player__hint">
-              ← → 10s &nbsp;·&nbsp; ↑ ↓ 30s
+              ⏪ Rewind &nbsp;·&nbsp; ⏩ Fast Fwd &nbsp;·&nbsp; ▶⏸ Play/Pause
             </span>
           </div>
         </div>

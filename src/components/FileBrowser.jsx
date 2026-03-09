@@ -1,6 +1,5 @@
-import { useEffect, useRef, useCallback, forwardRef } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useDriveBrowser } from '../hooks/useDriveBrowser.js';
-import { useFocusNav } from '../hooks/useFocusNav.js';
 import { FOLDER_MIME, scaleThumbnail } from '../utils/driveApi.js';
 import Breadcrumb from './Breadcrumb.jsx';
 import LoadingSpinner from './LoadingSpinner.jsx';
@@ -46,18 +45,20 @@ function PlayBadgeIcon() {
 
 // ── TV: Full-width list row ───────────────────────────────────────────────────
 //
-// One row per file; easy up/down d-pad navigation.
-// Thumbnail on left, name + metadata in middle, arrow indicator on right.
+// Cursor hovers → row highlights (via onMouseEnter → parent state).
+// Select/Enter/Click → opens the item.
+// No arrow-key navigation — Silk browser moves the cursor with arrow keys,
+// so we embrace cursor-based hover instead.
 
-const FileRow = forwardRef(function FileRow({ file, focused, onClick }, ref) {
+function FileRow({ file, focused, onMouseEnter, onClick }) {
   const isFolder = file.mimeType === FOLDER_MIME;
   const thumb = scaleThumbnail(file.thumbnailLink, 320);
   const duration = formatDuration(file.videoMediaMetadata?.durationMillis);
 
   return (
     <div
-      ref={ref}
       className={`file-row ${focused ? 'file-row--focused' : ''}`}
+      onMouseEnter={onMouseEnter}
       onClick={onClick}
       role="button"
       tabIndex={0}
@@ -90,20 +91,17 @@ const FileRow = forwardRef(function FileRow({ file, focused, onClick }, ref) {
       </div>
     </div>
   );
-});
+}
 
 // ── Phone: Compact grid card ──────────────────────────────────────────────────
-//
-// 2-column card grid; no focus ring (touch users tap, not navigate).
 
-const FileCard = forwardRef(function FileCard({ file, onClick }, ref) {
+function FileCard({ file, onClick }) {
   const isFolder = file.mimeType === FOLDER_MIME;
   const thumb = scaleThumbnail(file.thumbnailLink, 480);
   const duration = formatDuration(file.videoMediaMetadata?.durationMillis);
 
   return (
     <div
-      ref={ref}
       className="file-card"
       onClick={onClick}
       role="button"
@@ -146,7 +144,7 @@ const FileCard = forwardRef(function FileCard({ file, onClick }, ref) {
       <p className="file-card__name">{file.name}</p>
     </div>
   );
-});
+}
 
 // ── FileBrowser ───────────────────────────────────────────────────────────────
 
@@ -167,28 +165,57 @@ export default function FileBrowser({
     navigateToCrumb,
   } = useDriveBrowser();
 
-  // TV uses a 1-column list (columns=1 makes ArrowLeft/Right no-ops in useFocusNav,
-  // while ArrowUp/Down move ±1 — exactly right for a list).
-  // Phone uses 2 columns for the grid but keyboard nav is disabled anyway.
-  const columns = isTVDevice ? 1 : 2;
-  const { focusIndex, setFocusIndex, moveFocus } = useFocusNav(files.length, columns);
-  const itemRefs = useRef([]);
+  // TV nav: which row the cursor is currently over (-1 = none).
+  // Updated by onMouseEnter on each FileRow — no arrow keys needed.
+  const [hoveredIndex, setHoveredIndex] = useState(-1);
+
+  // Ref on the scrollable container for the auto-scroll zones.
+  const listRef = useRef(null);
+
+  // Used by the rAF scroll loop below — avoids re-creating the loop on state changes.
+  const scrollDirRef = useRef(0);   // -1 | 0 | 1
+  const scrollRafRef = useRef(null);
 
   // Load root on mount
   useEffect(() => {
     initialize();
   }, [initialize]);
 
-  // Scroll focused row into view and sync real browser focus.
-  // TV: centre the row vertically so it's never at the edge of the viewport.
-  // Phone: skip — touch users scroll freely, no focus indicator shown.
+  // Reset hovered row and scroll position whenever files change (new folder loaded).
   useEffect(() => {
-    if (!isTVDevice) return;
-    const el = itemRefs.current[focusIndex];
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    el.focus({ preventScroll: true });
-  }, [focusIndex, isTVDevice]);
+    setHoveredIndex(-1);
+    if (listRef.current) listRef.current.scrollTo({ top: 0 });
+  }, [files]);
+
+  // ── Auto-scroll zones (TV only) ───────────────────────────────────────────
+  // Moving the cursor into the top or bottom 15% of the screen smoothly
+  // scrolls the list — no manual scrollbar needed.
+  // The rAF loop runs at ~60 fps; scrollDir=0 means no scrolling.
+  useEffect(() => {
+    if (!isTVDevice || !active) return;
+
+    const loop = () => {
+      if (scrollDirRef.current !== 0 && listRef.current) {
+        listRef.current.scrollBy({ top: scrollDirRef.current * 8 });
+      }
+      scrollRafRef.current = requestAnimationFrame(loop);
+    };
+    scrollRafRef.current = requestAnimationFrame(loop);
+
+    const onMouseMove = (e) => {
+      const h = window.innerHeight;
+      if (e.clientY < h * 0.15)      scrollDirRef.current = -1;
+      else if (e.clientY > h * 0.85) scrollDirRef.current =  1;
+      else                            scrollDirRef.current =  0;
+    };
+    window.addEventListener('mousemove', onMouseMove);
+
+    return () => {
+      cancelAnimationFrame(scrollRafRef.current);
+      window.removeEventListener('mousemove', onMouseMove);
+      scrollDirRef.current = 0;
+    };
+  }, [isTVDevice, active]);
 
   // ── History API — Fire Stick back button & Android hardware back ─────────
   const navigateBackRef = useRef(navigateBack);
@@ -208,34 +235,31 @@ export default function FileBrowser({
   const handleSelect = useCallback(
     (item) => {
       if (item.mimeType === FOLDER_MIME) {
-        setFocusIndex(0);
         window.history.pushState({ gdSentinel: true }, '');
         navigateTo(item);
       } else {
         onPlayVideo(item);
       }
     },
-    [navigateTo, onPlayVideo, setFocusIndex],
+    [navigateTo, onPlayVideo],
   );
 
-  // ── Keyboard / d-pad navigation (TV only) ────────────────────────────────
-  // Disabled on phone — touch users tap items directly.
-  // Disabled while a video is playing (active=false) — VideoPlayer owns keys.
+  // ── Keyboard handler (TV + phone, when active) ────────────────────────────
+  // TV:    Enter / Space → open whichever row the cursor is hovering
+  //        Backspace / Escape → go up a folder (Fire Stick back button)
+  //        Arrow keys intentionally NOT handled — Silk moves the cursor with
+  //        them, so intercepting arrows would break cursor navigation.
+  // Phone: only Escape / Backspace are meaningful here.
   useEffect(() => {
-    if (!active || isPhone) return;
+    if (!active) return;
     const onKey = (e) => {
       switch (e.key) {
-        case 'ArrowRight':
-        case 'ArrowLeft':
-        case 'ArrowUp':
-        case 'ArrowDown':
-          e.preventDefault();
-          moveFocus(e.key);
-          break;
         case 'Enter':
         case ' ':
           e.preventDefault();
-          if (files[focusIndex]) handleSelect(files[focusIndex]);
+          if (hoveredIndex >= 0 && files[hoveredIndex]) {
+            handleSelect(files[hoveredIndex]);
+          }
           break;
         case 'Escape':
         case 'Backspace':
@@ -248,15 +272,19 @@ export default function FileBrowser({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, isPhone, focusIndex, files, moveFocus, handleSelect, navigateBack]);
+  }, [active, hoveredIndex, files, handleSelect, navigateBack]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="browser">
       {/* Header */}
       <header className="browser__header">
-        {/* Phone back button — visible in header instead of relying on remote */}
         {isPhone && breadcrumbs.length > 1 && (
+          <button className="browser__back-btn" onClick={navigateBack}>
+            ← Back
+          </button>
+        )}
+        {isTVDevice && breadcrumbs.length > 1 && (
           <button className="browser__back-btn" onClick={navigateBack}>
             ← Back
           </button>
@@ -267,8 +295,8 @@ export default function FileBrowser({
         </div>
       </header>
 
-      {/* Content */}
-      <main className="browser__content">
+      {/* Content — this element is the scroll container */}
+      <main className="browser__content" ref={listRef}>
         {loading && files.length === 0 && (
           <div className="page-center">
             <LoadingSpinner />
@@ -291,15 +319,18 @@ export default function FileBrowser({
           </div>
         )}
 
-        {/* TV: single-column list view for easy up/down remote navigation */}
+        {/* TV: single-column list, cursor-hover navigation */}
         {files.length > 0 && isTVDevice && (
-          <div className="file-list">
+          <div
+            className="file-list"
+            onMouseLeave={() => setHoveredIndex(-1)}
+          >
             {files.map((file, index) => (
               <FileRow
                 key={file.id}
                 file={file}
-                focused={focusIndex === index}
-                ref={(el) => { itemRefs.current[index] = el; }}
+                focused={hoveredIndex === index}
+                onMouseEnter={() => setHoveredIndex(index)}
                 onClick={() => handleSelect(file)}
               />
             ))}
@@ -309,11 +340,10 @@ export default function FileBrowser({
         {/* Phone: 2-column card grid, touch-only */}
         {files.length > 0 && isPhone && (
           <div className="file-grid file-grid--phone">
-            {files.map((file, index) => (
+            {files.map((file) => (
               <FileCard
                 key={file.id}
                 file={file}
-                ref={(el) => { itemRefs.current[index] = el; }}
                 onClick={() => handleSelect(file)}
               />
             ))}
@@ -321,10 +351,10 @@ export default function FileBrowser({
         )}
       </main>
 
-      {/* Remote hint footer — TV only */}
+      {/* Footer hint — TV only */}
       {isTVDevice && (
         <footer className="browser__footer">
-          <span>↑ ↓&nbsp; Navigate &nbsp;·&nbsp; OK&nbsp; Select &nbsp;·&nbsp; Back ⬅ Go up</span>
+          <span>Hover to highlight &nbsp;·&nbsp; OK / Click&nbsp; Open &nbsp;·&nbsp; Back ⬅ Go up</span>
         </footer>
       )}
     </div>
