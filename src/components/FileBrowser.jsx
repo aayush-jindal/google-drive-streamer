@@ -6,6 +6,29 @@ import LoadingSpinner from './LoadingSpinner.jsx';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * Compute auto-scroll speed (px per rAF frame) based on cursor position.
+ *
+ * Cursor in top/bottom 15% of screen → scrolls.
+ * Speed scales linearly with proximity to the screen edge:
+ *   just inside zone → ±2 px/frame
+ *   at the very edge → ±14 px/frame
+ *   outside zone     →  0 (no scroll)
+ */
+function getScrollSpeed(y, screenHeight) {
+  const topZone    = screenHeight * 0.15;
+  const bottomZone = screenHeight * 0.85;
+  if (y < topZone) {
+    const proximity = 1 - (y / topZone);        // 0 → 1 as cursor approaches top
+    return -(2 + proximity * 12);               // -2 px to -14 px
+  }
+  if (y > bottomZone) {
+    const proximity = (y - bottomZone) / (screenHeight - bottomZone); // 0 → 1
+    return  (2 + proximity * 12);               //  2 px to  14 px
+  }
+  return 0;
+}
+
 function formatDuration(ms) {
   if (!ms) return null;
   const s = Math.floor(Number(ms) / 1000);
@@ -173,7 +196,8 @@ export default function FileBrowser({
   const listRef = useRef(null);
 
   // Used by the rAF scroll loop below — avoids re-creating the loop on state changes.
-  const scrollDirRef = useRef(0);   // -1 | 0 | 1
+  // Stores the computed px/frame scroll speed (negative = up, 0 = stop, positive = down).
+  const scrollSpeedRef = useRef(0);
   const scrollRafRef = useRef(null);
 
   // Load root on mount
@@ -188,32 +212,31 @@ export default function FileBrowser({
   }, [files]);
 
   // ── Auto-scroll zones (TV only) ───────────────────────────────────────────
-  // Moving the cursor into the top or bottom 15% of the screen smoothly
-  // scrolls the list — no manual scrollbar needed.
-  // The rAF loop runs at ~60 fps; scrollDir=0 means no scrolling.
+  // Moving the cursor into the top or bottom 15% of the screen scrolls the
+  // list.  Speed scales with proximity to the screen edge:
+  //   just entering zone → ~2 px/frame
+  //   cursor at very edge → ~14 px/frame
+  // The rAF loop applies the computed speed every frame (~60 fps).
   useEffect(() => {
     if (!isTVDevice || !active) return;
 
     const loop = () => {
-      if (scrollDirRef.current !== 0 && listRef.current) {
-        listRef.current.scrollBy({ top: scrollDirRef.current * 8 });
+      if (scrollSpeedRef.current !== 0 && listRef.current) {
+        listRef.current.scrollBy({ top: scrollSpeedRef.current });
       }
       scrollRafRef.current = requestAnimationFrame(loop);
     };
     scrollRafRef.current = requestAnimationFrame(loop);
 
     const onMouseMove = (e) => {
-      const h = window.innerHeight;
-      if (e.clientY < h * 0.15)      scrollDirRef.current = -1;
-      else if (e.clientY > h * 0.85) scrollDirRef.current =  1;
-      else                            scrollDirRef.current =  0;
+      scrollSpeedRef.current = getScrollSpeed(e.clientY, window.innerHeight);
     };
     window.addEventListener('mousemove', onMouseMove);
 
     return () => {
       cancelAnimationFrame(scrollRafRef.current);
       window.removeEventListener('mousemove', onMouseMove);
-      scrollDirRef.current = 0;
+      scrollSpeedRef.current = 0;
     };
   }, [isTVDevice, active]);
 

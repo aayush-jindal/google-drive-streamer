@@ -55,7 +55,7 @@ import { Readable } from 'stream';
 
 // Minimum bytes served per request — expands whatever the browser asks to give
 // conservative browsers like Silk on Fire Stick maximum buffer runway.
-const MIN_CHUNK_BYTES = 20 * 1024 * 1024; // 20 MB
+const MIN_CHUNK_BYTES = 40 * 1024 * 1024; // 40 MB
 
 // Maximum time allowed for Drive to deliver the first response byte (headers).
 // Cleared as soon as headers arrive so body-streaming is never aborted.
@@ -234,7 +234,10 @@ export default async function handler(req, res) {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Keep-Alive', 'timeout=30');
     res.setHeader('X-Accel-Buffering', 'no');  // disable Vercel edge buffering
-    res.setHeader('Cache-Control', 'no-store');
+    // private: browser may cache; CDN must not.
+    // max-age=300: chunk survives in browser cache long enough for the prefetch
+    // video element to prime it before the main player reaches that byte range.
+    res.setHeader('Cache-Control', 'private, max-age=300');
 
     const contentRange = driveRes.headers.get('content-range');
     const contentLength = driveRes.headers.get('content-length');

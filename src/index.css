@@ -692,6 +692,34 @@ img    { display: block; }
   padding: 10px 12px;
 }
 
+/* ── TV: double-press back toast ────────────────────────────────────────────── */
+/* Appears on first Back press; dismissed automatically or on second Back press. */
+.player__back-toast {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  /* ~28px at the 22px html base */
+  font-size: 1.27rem;
+  font-weight: 600;
+  padding: 26px 56px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 25;
+  animation: back-toast-fade 2s ease forwards;
+}
+
+@keyframes back-toast-fade {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.93); }
+  12%  { opacity: 1; transform: translate(-50%, -50%) scale(1);    }
+  75%  { opacity: 1; transform: translate(-50%, -50%) scale(1);    }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.97); }
+}
+
 /* ── TV: seek flash indicator ───────────────────────────────────────────────── */
 /* Centred badge that briefly shows "⏩ +10s" or "⏪ -10s" when the user seeks. */
 .player__seek-hint {

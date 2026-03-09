@@ -21,8 +21,17 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
   const [buffering, setBuffering] = useState(true);
   const [showControls, setShowControls] = useState(true);
   const [videoError, setVideoError] = useState(null);
-  const [seekHint, setSeekHint] = useState(null); // { label: string } | null
+  const [seekHint, setSeekHint] = useState(null);     // { label: string } | null
   const seekHintTimerRef = useRef(null);
+
+  // Double-press back: first press shows a toast, second press exits.
+  // Prevents accidental exits when the remote Back button is bumped.
+  const [showBackToast, setShowBackToast] = useState(false);
+  const backPressRef  = useRef(0);
+  const backTimerRef  = useRef(null);
+
+  // Hidden video element kept 60 s ahead of main playback for prefetching.
+  const prefetchRef = useRef(null);
 
   const isPhone = !isTVDevice;
 
@@ -103,6 +112,136 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
     return () => Object.entries(handlers).forEach(([evt, fn]) => v.removeEventListener(evt, fn));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Buffer diagnostics (temporary) ──────────────────────────────────────
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const onWaiting = () =>
+      console.log('[video] buffering started at', video.currentTime);
+    const onPlaying = () =>
+      console.log('[video] buffering ended at', video.currentTime);
+    const onProgress = () => {
+      if (video.buffered.length > 0) {
+        console.log(
+          '[video] buffered up to',
+          video.buffered.end(video.buffered.length - 1),
+          'current:', video.currentTime,
+        );
+      }
+    };
+
+    video.addEventListener('waiting', onWaiting);
+    video.addEventListener('playing', onPlaying);
+    video.addEventListener('progress', onProgress);
+
+    return () => {
+      video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('playing', onPlaying);
+      video.removeEventListener('progress', onProgress);
+    };
+  }, []);
+
+  // ── Prefetch: keep a hidden video 60 s ahead of main playback ───────────────
+  //
+  // A hidden, muted <video> element is kept 60 s ahead of the main player.
+  // This causes the browser to fetch and buffer the NEXT 40 MB chunk well
+  // before the main player reaches the chunk boundary, eliminating the stall
+  // that would otherwise occur while waiting for the next range response.
+  //
+  // The prefetch is deliberately delayed until after the main video fires its
+  // first 'playing' event so it does not compete with the initial buffer fill.
+  //
+  // Caching note: stream-video.js returns Cache-Control: private, max-age=300
+  // so the browser can serve the same byte range to the main player from its
+  // cache when it catches up, rather than re-fetching from the server.
+  //
+  // play()+pause() (rather than just setting currentTime) is used because some
+  // browsers only issue range requests when the element is in a "wants to play"
+  // state.  The 'playing' listener immediately pauses so no audio leaks through
+  // (muted already prevents that, but this is a belt-and-suspenders guard).
+  useEffect(() => {
+    const main = videoRef.current;
+    const prefetch = prefetchRef.current;
+    if (!main || !prefetch) return;
+
+    let started = false;
+
+    const syncPrefetch = () => {
+      if (!started || !main.duration || main.duration === Infinity) return;
+      const target = Math.min(main.currentTime + 60, main.duration - 1);
+
+      // No-op if the main player's own buffer already covers this position.
+      for (let i = 0; i < main.buffered.length; i++) {
+        if (main.buffered.start(i) <= target && main.buffered.end(i) >= target) return;
+      }
+
+      if (Math.abs(prefetch.currentTime - target) > 10) {
+        console.log(
+          '[prefetch] seeking to', target.toFixed(1), 's',
+          '(main at', main.currentTime.toFixed(1), 's)',
+        );
+        prefetch.currentTime = target;
+        prefetch.play().catch(() => {});
+      }
+    };
+
+    // Assign src only after main video starts playing to avoid
+    // a duplicate metadata request competing with initial load.
+    const onFirstPlaying = () => {
+      if (started) return;
+      started = true;
+      main.removeEventListener('playing', onFirstPlaying);
+      prefetch.src = videoSrc;
+      prefetch.load();
+    };
+
+    // Immediately pause whenever the prefetch element starts playing.
+    const onPrefetchPlaying = () => prefetch.pause();
+
+    // Re-sync after every manual seek on the main player.
+    const onMainSeeked = () => syncPrefetch();
+
+    main.addEventListener('playing', onFirstPlaying);
+    prefetch.addEventListener('playing', onPrefetchPlaying);
+    main.addEventListener('seeked', onMainSeeked);
+    const interval = setInterval(syncPrefetch, 5000);
+
+    return () => {
+      clearInterval(interval);
+      main.removeEventListener('playing', onFirstPlaying);
+      prefetch.removeEventListener('playing', onPrefetchPlaying);
+      main.removeEventListener('seeked', onMainSeeked);
+      prefetch.pause();
+      prefetch.removeAttribute('src');
+      prefetch.load();
+    };
+  }, [videoSrc]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clean up back-press timer on unmount.
+  useEffect(() => () => clearTimeout(backTimerRef.current), []);
+
+  // ── Double-press back ─────────────────────────────────────────────────────
+  // First press: show a toast and arm a 2-second window.
+  // Second press within that window: exit the player.
+  // If 2 seconds pass without a second press, reset silently.
+  const handleBack = useCallback(() => {
+    backPressRef.current += 1;
+    if (backPressRef.current === 1) {
+      setShowBackToast(true);
+      revealControls();
+      backTimerRef.current = setTimeout(() => {
+        backPressRef.current = 0;
+        setShowBackToast(false);
+      }, 2000);
+    } else {
+      clearTimeout(backTimerRef.current);
+      backPressRef.current = 0;
+      setShowBackToast(false);
+      onBack();
+    }
+  }, [onBack, revealControls]);
+
   // ── Playback controls (TV) ────────────────────────────────────────────────
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -145,11 +284,11 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
           e.preventDefault();
           togglePlay();
           break;
-        // Back button → exit player
+        // Back button → double-press to exit (prevents accidental exits)
         case 'Escape':
         case 'Backspace':
           e.preventDefault();
-          onBack();
+          handleBack();
           break;
         // Play/Pause media key — W3C name + keyCode 179
         case 'MediaPlayPause':
@@ -179,7 +318,7 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isTVDevice, togglePlay, seek, onBack, revealControls]);
+  }, [isTVDevice, togglePlay, seek, handleBack, revealControls]);
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -203,6 +342,9 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
           preload="auto"
           controls
         />
+
+        {/* Hidden prefetch element — src assigned by useEffect after first play */}
+        <video ref={prefetchRef} muted preload="auto" style={{ display: 'none' }} />
 
         {/* Buffering spinner — shown until the browser has enough data to play */}
         {buffering && !videoError && (
@@ -241,6 +383,9 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
         preload="auto"
       />
 
+      {/* Hidden prefetch element — src assigned by useEffect after first play */}
+      <video ref={prefetchRef} muted preload="auto" style={{ display: 'none' }} />
+
       {buffering && !videoError && (
         <div className="player__overlay">
           <LoadingSpinner />
@@ -258,6 +403,13 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
       {seekHint && (
         <div key={seekHint.label} className="player__seek-hint">
           {seekHint.label}
+        </div>
+      )}
+
+      {/* Double-press back toast — shown on first Back press, clears on second */}
+      {showBackToast && (
+        <div className="player__back-toast">
+          Press back again to exit
         </div>
       )}
 
@@ -283,7 +435,7 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
           </div>
 
           <div className="player__bar">
-            <button className="player__btn player__btn--back" onClick={onBack}>
+            <button className="player__btn player__btn--back" onClick={handleBack}>
               ← Back
             </button>
 
