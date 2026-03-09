@@ -1,0 +1,10 @@
+{
+  "framework": "vite",
+  "functions": {
+    "api/stream-video.js": { "maxDuration": 10 },
+    "api/list-files.js":   { "maxDuration": 10 }
+  },
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}
