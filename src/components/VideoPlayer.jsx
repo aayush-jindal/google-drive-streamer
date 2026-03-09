@@ -211,22 +211,29 @@ export default function VideoPlayer({ file, onBack, isTVDevice = true }) {
 
     // Re-enable prefetch: clears the seeking guard, assigns src, and syncs
     // the hidden element to 60 s ahead of the main player's current position.
+    // syncPrefetch is deferred until loadedmetadata so the element is out of
+    // HAVE_NOTHING state and the currentTime seek is guaranteed to take effect.
     const restartPrefetch = () => {
       isSeeking = false;
       prefetch.src = videoSrc;
+      const onMeta = () => {
+        prefetch.removeEventListener('loadedmetadata', onMeta);
+        syncPrefetch();
+      };
+      prefetch.addEventListener('loadedmetadata', onMeta);
       prefetch.load();
-      syncPrefetch();
     };
 
     // Poll every 2 s until the main player has 20 s of buffer ahead.
     // Only then re-enable the prefetch so it doesn't compete with recovery.
-    const waitForBuffer = () => {
+    // Capped at 30 attempts (60 s) so a paused-after-seek video doesn't loop forever.
+    const waitForBuffer = (attempt = 0) => {
       const ahead = getBufferedAhead(main);
       if (ahead > 20) {
         console.log('[prefetch] main buffered', ahead.toFixed(1), 's — restarting prefetch');
         restartPrefetch();
-      } else {
-        waitTimer = setTimeout(waitForBuffer, 2000);
+      } else if (attempt < 30) {
+        waitTimer = setTimeout(() => waitForBuffer(attempt + 1), 2000);
       }
     };
 
