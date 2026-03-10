@@ -4,7 +4,7 @@ This document explains how the Google Drive TV Streamer works from end to end, t
 
 ## How It Works
 
-### Complete Flow: Browser → Vercel → Google Drive
+### Complete Flow: Browser → Cloud Run → Google Drive
 
 1. **User opens the app** — React loads, shows password screen if not authenticated
 2. **User enters password** — checked client-side against `VITE_APP_PASSWORD` (baked in at build time)
@@ -21,12 +21,11 @@ This document explains how the Google Drive TV Streamer works from end to end, t
 - **OAuth** requires each user to sign in with Google. On a TV (Fire Stick, Jio Box), there is no keyboard for typing credentials, and the OAuth flow often breaks on TV browsers.
 - **Service Account** is a server-side-only credential. The user never signs in. You share a folder with the service account email once, and the app can access it forever. This is ideal for family use: one person sets it up, everyone watches.
 
-### Why Vercel Serverless Instead of Full Backend
+### Why a Small Backend (Cloud Run) Instead of Direct Drive URLs
 
-- **Zero cost at hobby scale** — Vercel's free tier handles the traffic
-- **No server to maintain** — no SSH, no updates, no uptime monitoring
-- **Automatic scaling** — each request is isolated; no cold-start issues for our use case
-- **Built-in CDN** — static assets served fast globally
+- **Keeps the Drive token server-side** — the browser never sees the bearer token
+- **Works with Range requests** — each seek triggers a new Range request which the backend proxies to Drive
+- **Scales automatically** — Cloud Run scales instances based on traffic
 
 ### Range Request Streaming Explained
 
@@ -40,7 +39,7 @@ Our `/api/stream-video` function:
 4. Pipes the response body straight back to the browser
 5. Sets `Content-Range`, `Content-Length`, `Accept-Ranges` so the browser knows it can seek
 
-Because each request only transfers a chunk (not the whole file), we stay within Vercel's 10-second function limit. Seeking triggers a new request for the new byte range.
+Because each request only transfers a chunk (not the whole file), the backend can serve long videos safely while the browser seeks using standard HTTP Range requests.
 
 ### TV vs Phone Detection Logic
 
@@ -81,7 +80,7 @@ We use a simple client-side password check (`VITE_APP_PASSWORD`) stored in sessi
 
 ```
 ┌─────────┐                ┌──────────────┐                ┌─────────────┐
-│ Browser │                │   Vercel     │                │ Google      │
+│ Browser │                │  Cloud Run   │                │ Google      │
 └────┬────┘                └──────┬───────┘                └──────┬──────┘
      │                             │                                │
      │  GET / (index.html + JS)    │                                │
@@ -107,7 +106,7 @@ We use a simple client-side password check (`VITE_APP_PASSWORD`) stored in sessi
 
 ```
 ┌─────────┐                ┌──────────────┐                ┌─────────────┐
-│ Browser │                │   Vercel     │                │ Google      │
+│ Browser │                │  Cloud Run   │                │ Google      │
 └────┬────┘                └──────┬───────┘                └──────┬──────┘
      │                             │                                │
      │  User clicks folder         │                                │
@@ -129,7 +128,7 @@ We use a simple client-side password check (`VITE_APP_PASSWORD`) stored in sessi
 
 ```
 ┌─────────┐                ┌──────────────┐                ┌─────────────┐
-│ Browser │                │   Vercel     │                │ Google      │
+│ Browser │                │  Cloud Run   │                │ Google      │
 └────┬────┘                └──────┬───────┘                └──────┬──────┘
      │                             │                                │
      │  <video src="/api/stream-video?fileId=X">                   │
@@ -157,7 +156,7 @@ We use a simple client-side password check (`VITE_APP_PASSWORD`) stored in sessi
 
 ```
 ┌─────────┐                ┌──────────────┐                ┌─────────────┐
-│ Browser │                │   Vercel     │                │ Google      │
+│ Browser │                │  Cloud Run   │                │ Google      │
 └────┬────┘                └──────┬───────┘                └──────┬──────┘
      │                             │                                │
      │  User seeks to 10:00        │                                │
@@ -185,13 +184,15 @@ We use a simple client-side password check (`VITE_APP_PASSWORD`) stored in sessi
 
 | File | Purpose |
 |------|---------|
-| `api/_auth.js` | Service account auth, cached per warm Vercel instance |
-| `api/list-files.js` | Lists folders and videos in a Drive folder |
-| `api/stream-video.js` | Range-request proxy: forwards byte ranges to Drive, pipes back |
-| `src/App.jsx` | Root component: auth gate, FileBrowser + VideoPlayer |
-| `src/components/FileBrowser.jsx` | Folder grid, cursor/hover nav (TV), touch grid (phone) |
-| `src/components/VideoPlayer.jsx` | Custom controls (TV) or native (phone), remote key handling |
-| `src/hooks/useDevice.js` | TV vs phone detection |
-| `src/hooks/useDriveBrowser.js` | Drive folder state, fetch from /api/list-files |
-| `src/hooks/useAuth.js` | Password check, sessionStorage persistence |
-| `src/utils/driveApi.js` | Thumbnail URL scaling, folder MIME constant |
+| `backend/src/auth.js` | Service account auth, cached per warm instance |
+| `backend/src/routes/listFiles.js` | Lists folders and videos in a Drive folder |
+| `backend/src/routes/streamVideo.js` | Range-request proxy: forwards byte ranges to Drive, pipes back (40 MB expansion) |
+| `backend/src/server.js` | Express server: CORS, logging, `/api/*` routes, `/health` |
+| `frontend/src/App.jsx` | Root component: auth gate, FileBrowser + VideoPlayer |
+| `frontend/src/components/FileBrowser.jsx` | Folder grid/list UI, TV + phone behaviours |
+| `frontend/src/components/VideoPlayer.jsx` | Video playback UI; points `<video>` at the backend stream route |
+| `frontend/src/hooks/useDevice.js` | TV vs phone detection |
+| `frontend/src/hooks/useDriveBrowser.js` | Drive folder state, fetches file list from the backend |
+| `frontend/src/hooks/useAuth.js` | Password check, sessionStorage persistence |
+| `frontend/src/config.js` | Central API base URL (`VITE_API_URL` / localhost fallback) |
+| `frontend/src/utils/driveApi.js` | Thumbnail URL scaling, folder MIME constant |

@@ -2,16 +2,26 @@
 node_modules/
 .pnp
 .pnp.js
+frontend/node_modules/
+backend/node_modules/
 
 # ── Build output ──────────────────────────────────────────────────────────────
 dist/
 dist-ssr/
+frontend/dist/
+
+# ── Tooling caches ────────────────────────────────────────────────────────────
+.vite/
+frontend/.vite/
+backend/.vite/
 
 # ── Environment & secrets — NEVER commit these ────────────────────────────────
 .env
 .env.local
 .env.*.local
+.env.*
 *.local
+!**/.env.example
 
 # Service account JSON key files
 service-account*.json
@@ -19,8 +29,11 @@ service-account*.json
 *.json.key
 *-credentials.json
 
-# ── Vercel ────────────────────────────────────────────────────────────────────
+# ── Deployment / tooling ──────────────────────────────────────────────────────
 .vercel/
+.wrangler/
+.dev.vars
+.cloudflare/
 
 # ── Editor / OS ───────────────────────────────────────────────────────────────
 .DS_Store

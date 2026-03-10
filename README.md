@@ -5,7 +5,6 @@
 
   > Watch your private Google Drive videos on any TV — Fire Stick, Jio Box, Smart TV — privately and securely.
 
-  [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/aayush-jindal/google-drive-streamer&env=GOOGLE_SERVICE_ACCOUNT_JSON,VITE_APP_PASSWORD)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
   [![Made with React](https://img.shields.io/badge/Made%20with-React-61dafb?logo=react)](https://reactjs.org/)
 </div>
@@ -18,40 +17,38 @@
 - 🎬 **Smooth streaming** with optimized range requests
 - 🔑 **Password protected** — only your family can access
 - 🗂️ **Browse your entire Google Drive folder structure**
-- ⚡ **Deployed on Vercel free tier** — zero ongoing cost
+- ⚡ **Backend + frontend separated** — Cloud Run (API) + Cloudflare Pages (UI)
 
 ## 🏗️ Architecture
 
 ```
 ┌─────────────┐     ┌─────────────────────────┐     ┌───────────────┐
-│   Browser   │────▶│  Vercel Serverless API  │────▶│ Google Drive  │
+│   Browser   │────▶│   Cloud Run (Express)   │────▶│ Google Drive  │
 │  (TV/Phone) │◀────│  (Service Account Auth) │◀────│   (Storage)   │
 └─────────────┘     └─────────────────────────┘     └───────────────┘
 ```
 
+Frontend is a static React app deployed to Cloudflare Pages. It calls the Cloud Run backend over HTTPS.
+
 All Drive API calls happen server-side. Your service account key never touches the browser. Videos stream through the API using HTTP range requests.
 
-## 🚀 Deploy Your Own (5 minutes)
+## 🗂️ Repo Structure
+
+```
+/
+├── frontend/   # React (Vite) app → Cloudflare Pages
+└── backend/    # Express API → Google Cloud Run
+```
+
+## 🚀 Deploy Your Own
 
 ### Prerequisites
 
 - Google Account with videos in Google Drive
-- Vercel account (free)
 - Google Cloud Console account (free)
+- Cloudflare account (for Pages)
 
-### Step 1: Clone & Deploy
-
-**[Deploy with one click](https://vercel.com/new/clone?repository-url=https://github.com/aayush-jindal/google-drive-streamer&env=GOOGLE_SERVICE_ACCOUNT_JSON,VITE_APP_PASSWORD)** — then add your env vars in the Vercel dashboard.
-
-Or deploy manually:
-
-```bash
-git clone https://github.com/aayush-jindal/google-drive-streamer.git
-cd google-drive-streamer
-vercel deploy
-```
-
-### Step 2: Google Cloud Setup
+### Google Cloud Setup
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services → Library**
 2. Enable the **Google Drive API**
@@ -60,14 +57,22 @@ vercel deploy
 5. Download the JSON file
 6. **Share your Drive folder** with the service account's `client_email` (found in the JSON — it looks like `xxx@xxx.iam.gserviceaccount.com`)
 
-### Step 3: Environment Variables
+### Environment Variables
 
-Add these in **Vercel Dashboard → Project → Settings → Environment Variables**:
+Backend (`backend/`):
 
 | Variable | Description |
 |----------|-------------|
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Full contents of your service account JSON, minified to **one line** (no newlines) |
-| `VITE_APP_PASSWORD` | Password to protect your app — share with family |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Full service account JSON contents, minified to **one line** |
+| `FRONTEND_URL` | Your Pages URL (used for CORS), e.g. `https://stream.rasiklabs.com` |
+| `PORT` | Cloud Run uses `8080` (optional locally) |
+
+Frontend (`frontend/`):
+
+| Variable | Description |
+|----------|-------------|
+| `VITE_API_URL` | Your Cloud Run URL, e.g. `https://api.rasiklabs.com` |
+| `VITE_APP_PASSWORD` | Password to protect the app (baked into the JS bundle) |
 
 **Tip:** Minify the JSON in one command:
 ```bash
@@ -75,9 +80,11 @@ cat your-service-account.json | tr -d '\n' | pbcopy
 ```
 Then paste as the value of `GOOGLE_SERVICE_ACCOUNT_JSON`.
 
-### Step 4: Done!
+### Local development notes
 
-Open your Vercel URL, enter the password, and start watching 🎬
+- Frontend defaults to `http://localhost:3001` when `VITE_API_URL` is not set.
+- Run backend locally with `PORT=3001` to match.
+- `frontend/vite.config.js` proxies `/api` to `http://localhost:3001` for local dev convenience.
 
 ## 📱 Device Support
 
@@ -92,7 +99,8 @@ Open your Vercel URL, enter the password, and start watching 🎬
 ## 🔧 Tech Stack
 
 - **React + Vite** — frontend
-- **Vercel Serverless Functions** — backend API
+- **Express on Cloud Run** — backend API
+- **Cloudflare Pages** — static hosting for frontend
 - **Google Drive API + Service Account** — auth & storage
 - **google-auth-library** — token management
 
@@ -101,7 +109,7 @@ Open your Vercel URL, enter the password, and start watching 🎬
 - Service account key **never exposed** to the browser — all Drive API calls happen server-side
 - Password protection on the frontend (baked into build — use a unique password)
 - Videos stream directly from Google Drive through the proxy
-- No video data stored on Vercel — only metadata and streaming bytes pass through
+- No video data stored on your hosting provider — only metadata and streaming bytes pass through the backend proxy
 
 ## 🤖 Built With AI
 
