@@ -1,176 +1,122 @@
-# Google Drive Streamer
+<div align="center">
+  <img src="./logo.png" alt="Google Drive TV Streamer" width="120" height="120" />
 
-A password-protected TV/Fire Stick video browser that streams MP4 files directly from Google Drive. Built with React + Vite on the frontend and Vercel serverless functions for the backend API.
+  # Google Drive TV Streamer
 
-## How it Works
+  > Watch your private Google Drive videos on any TV — Fire Stick, Jio Box, Smart TV — privately and securely.
 
-The app uses a **range-request proxy** architecture:
+  [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/aayush-jindal/google-drive-streamer&env=GOOGLE_SERVICE_ACCOUNT_JSON,VITE_APP_PASSWORD)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+  [![Made with React](https://img.shields.io/badge/Made%20with-React-61dafb?logo=react)](https://reactjs.org/)
+</div>
 
-1. The frontend fetches the file list from `/api/list-files` (a serverless function that calls the Drive v3 API using a service account)
-2. When a video is selected, the browser's native `<video>` element is pointed at `/api/stream-video?fileId=<id>`
-3. The browser automatically issues `Range: bytes=X-Y` requests for each chunk it needs
-4. The serverless function forwards each range request to Google Drive with a service account bearer token, and pipes the chunk straight back
-5. Seeking, buffering, and playback are all handled natively by the browser — the serverless function just relays byte ranges on demand
+## ✨ Features
 
-This approach works within Vercel's Hobby plan 10-second function timeout because each call only transfers a small chunk (~1–2 MB), not the whole file.
+- 🔒 **Completely private** — your videos never become public
+- 📺 **Works on Fire Stick, Jio Box, Android TV, Smart TV** — and any device with a browser
+- 📱 **Responsive** — works on phone and desktop too
+- 🎬 **Smooth streaming** with optimized range requests
+- 🔑 **Password protected** — only your family can access
+- 🗂️ **Browse your entire Google Drive folder structure**
+- ⚡ **Deployed on Vercel free tier** — zero ongoing cost
 
-## Features
+## 🏗️ Architecture
 
-- Password lock screen before accessing the app
-- Browse Google Drive folders and video files
-- Full-screen video player with seek bar and time display
-- Keyboard and Fire Stick remote navigation (arrow keys, OK, Back, media buttons)
-- Wake Lock API to prevent screen saver during playback
-- Dark TV-optimised UI — large text, high-contrast focus rings, 3-column grid
+```
+┌─────────────┐     ┌─────────────────────────┐     ┌───────────────┐
+│   Browser   │────▶│  Vercel Serverless API  │────▶│ Google Drive  │
+│  (TV/Phone) │◀────│  (Service Account Auth) │◀────│   (Storage)   │
+└─────────────┘     └─────────────────────────┘     └───────────────┘
+```
 
-## Prerequisites
+All Drive API calls happen server-side. Your service account key never touches the browser. Videos stream through the API using HTTP range requests.
 
-- A **Google Cloud project** with the Drive API enabled
-- A **service account** with access to your Drive files (shared folder or Shared Drive)
-- A **Vercel account** (free Hobby plan is sufficient)
+## 🚀 Deploy Your Own (5 minutes)
 
-## Setup
+### Prerequisites
 
-### 1. Create a Google Service Account
+- Google Account with videos in Google Drive
+- Vercel account (free)
+- Google Cloud Console account (free)
+
+### Step 1: Clone & Deploy
+
+**[Deploy with one click](https://vercel.com/new/clone?repository-url=https://github.com/aayush-jindal/google-drive-streamer&env=GOOGLE_SERVICE_ACCOUNT_JSON,VITE_APP_PASSWORD)** — then add your env vars in the Vercel dashboard.
+
+Or deploy manually:
+
+```bash
+git clone https://github.com/aayush-jindal/google-drive-streamer.git
+cd google-drive-streamer
+vercel deploy
+```
+
+### Step 2: Google Cloud Setup
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services → Library**
 2. Enable the **Google Drive API**
 3. Go to **IAM & Admin → Service Accounts → Create Service Account**
-4. Download the JSON key file (**Keys → Add Key → JSON**)
-5. Share your Drive folder (or Shared Drive) with the service account's `client_email`
+4. Create a key: **Keys → Add Key → Create new key → JSON**
+5. Download the JSON file
+6. **Share your Drive folder** with the service account's `client_email` (found in the JSON — it looks like `xxx@xxx.iam.gserviceaccount.com`)
 
-### 2. Configure Environment Variables
+### Step 3: Environment Variables
 
-Copy `.env.example` to `.env.local`:
+Add these in **Vercel Dashboard → Project → Settings → Environment Variables**:
 
-```bash
-cp .env.example .env.local
-```
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Full contents of your service account JSON, minified to **one line** (no newlines) |
+| `VITE_APP_PASSWORD` | Password to protect your app — share with family |
 
-Fill in `.env.local`:
-
-```
-VITE_APP_PASSWORD=your-secret-password
-GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"..."}
-```
-
-The service account JSON must be **on a single line** — no newlines inside the value. You can minify it with:
-
+**Tip:** Minify the JSON in one command:
 ```bash
 cat your-service-account.json | tr -d '\n' | pbcopy
 ```
+Then paste as the value of `GOOGLE_SERVICE_ACCOUNT_JSON`.
 
-Then paste the result as the value of `GOOGLE_SERVICE_ACCOUNT_JSON`.
+### Step 4: Done!
 
-### 3. Run Locally
+Open your Vercel URL, enter the password, and start watching 🎬
 
-```bash
-npm install
-vercel dev        # serves both the Vite frontend and /api routes on http://localhost:3000
-```
+## 📱 Device Support
 
-> Use `vercel dev` (not `npm run dev`) so the serverless `/api` routes work locally.
+| Device | Browser | Status |
+|--------|---------|--------|
+| Amazon Fire Stick | Silk Browser | ✅ Fully supported |
+| Jio Box | Built-in browser | ✅ Fully supported |
+| Android TV | Chrome | ✅ Fully supported |
+| iPhone / Android | Safari / Chrome | ✅ Fully supported |
+| Desktop | Any browser | ✅ Fully supported |
 
-Alternatively, use the custom dev server:
+## 🔧 Tech Stack
 
-```bash
-npm run dev:api   # starts API on :3001
-npm run dev       # starts Vite on :5173 (proxies /api to :3001)
-```
+- **React + Vite** — frontend
+- **Vercel Serverless Functions** — backend API
+- **Google Drive API + Service Account** — auth & storage
+- **google-auth-library** — token management
 
-## Deployment (Vercel)
+## 🔒 Security
 
-### Environment Variables
+- Service account key **never exposed** to the browser — all Drive API calls happen server-side
+- Password protection on the frontend (baked into build — use a unique password)
+- Videos stream directly from Google Drive through the proxy
+- No video data stored on Vercel — only metadata and streaming bytes pass through
 
-Set these in **Vercel Dashboard → Project → Settings → Environment Variables**:
+## 🤖 Built With AI
 
-| Variable | Description |
-|---|---|
-| `VITE_APP_PASSWORD` | Password shown on the lock screen |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Full service account JSON, minified to a single line |
+This project was built collaboratively with **Claude** (Anthropic's AI coding assistant). The entire development process — from architecture decisions to debugging streaming issues on Fire Stick — was a human-AI collaboration.
 
-> **Important:** Paste the service account JSON as a single line. Multi-line values will fail to parse.
+## 📖 Article Series
 
-### Deploy
+This project is documented in a 3-part Medium series:
 
-```bash
-npm install -g vercel
-vercel --prod
-```
+- **Part 1:** The Problem & Architecture
+- **Part 2:** Google Cloud Setup Guide
+- **Part 3:** Building for TV — The Hard Parts
 
-Or connect the GitHub repo in the Vercel dashboard for automatic deploys on push.
+*Links to be added when published.*
 
-**Build settings** (auto-detected from `vercel.json`):
+## 📄 License
 
-| Setting | Value |
-|---|---|
-| Framework | Vite |
-| Build command | `npm run build` |
-| Output directory | `dist` |
-
-## Project Structure
-
-```
-├── api/
-│   ├── _auth.js          # Shared service account auth helper (cached per warm instance)
-│   ├── list-files.js     # GET /api/list-files?folderId=<id>
-│   └── stream-video.js   # GET /api/stream-video?fileId=<id>  (range-request proxy)
-├── src/
-│   ├── App.jsx
-│   ├── components/
-│   │   ├── FileBrowser.jsx   # Folder/file grid with TV remote navigation
-│   │   ├── VideoPlayer.jsx   # Full-screen player with seek + remote controls
-│   │   ├── Breadcrumb.jsx
-│   │   ├── PasswordScreen.jsx
-│   │   └── LoadingSpinner.jsx
-│   ├── hooks/
-│   │   ├── useAuth.js        # Password auth, persisted in sessionStorage
-│   │   ├── useDriveBrowser.js # Drive folder navigation state
-│   │   └── useFocusNav.js    # TV remote grid focus management
-│   ├── utils/
-│   │   └── driveApi.js
-│   └── index.css             # TV-friendly dark theme
-├── vercel.json
-└── vite.config.js
-```
-
-## Fire Stick / TV Remote Controls
-
-### File Browser
-| Key | Action |
-|---|---|
-| Arrow keys | Move focus between files |
-| OK / Enter | Open folder or play video |
-| Back / Escape | Go up one folder |
-
-### Video Player
-| Key | Action |
-|---|---|
-| OK / Enter / Space | Play / Pause |
-| ← / → | Seek ±10 seconds |
-| ↑ / ↓ | Seek ±30 seconds |
-| Back / Escape | Return to file browser |
-| Media Play/Pause | Play / Pause |
-| Media Fast Forward | Seek +30 seconds |
-| Media Rewind | Seek −30 seconds |
-
-## Supported Video Formats
-
-Any format the Fire Stick browser can decode natively — primarily **MP4 (H.264/AAC)**. H.265/HEVC and `.mov` files may not play; convert them to H.264 MP4 first.
-
-## Docker (Local / LAN)
-
-For local network access without Vercel:
-
-```bash
-cp .env.example .env.local   # fill in values
-./rebuild.sh                  # builds and starts on http://localhost:5173
-```
-
-> The Docker setup uses the Vite dev server with a Node API proxy (`dev-server.js`). The production Dockerfile builds a static nginx image that does **not** include the `/api` routes — use Vercel for the full experience.
-
-## Security Notes
-
-- `GOOGLE_SERVICE_ACCOUNT_JSON` is only read in serverless functions — it is never sent to the browser
-- `VITE_APP_PASSWORD` is baked into the JS bundle at build time (visible in source). Use a password that is not reused elsewhere
-- The service account should be granted the minimum required scope: **read-only Drive access** to only the folders you want to share
+MIT License — use it, modify it, share it freely. See [LICENSE](LICENSE) for details.

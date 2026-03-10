@@ -25,6 +25,7 @@ export default function PasswordScreen({ onLogin }) {
   return (
     <div className="password-screen">
       <div className={`password-screen__card ${shaking ? 'password-screen__card--shake' : ''}`}>
+        <img src="/logo.png" alt="" className="password-screen__logo" width={80} height={80} />
         <h1 className="password-screen__title">Drive Streamer</h1>
         <p className="password-screen__subtitle">Enter password to continue</p>
 

@@ -43,7 +43,7 @@ function formatDuration(ms) {
 
 function FolderIcon({ size = 64 }) {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" width={size} height={size} style={{ color: '#4fc3f7' }}>
+    <svg viewBox="0 0 24 24" fill="currentColor" width={size} height={size} className="file-row__folder-icon">
       <path d="M10 4H2C.9 4 0 4.9 0 6v12c0 1.1.9 2 2 2h20c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-10l-2-2z" />
     </svg>
   );
@@ -51,7 +51,7 @@ function FolderIcon({ size = 64 }) {
 
 function VideoIcon({ size = 64 }) {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" width={size} height={size} style={{ color: '#666' }}>
+    <svg viewBox="0 0 24 24" fill="currentColor" width={size} height={size} className="file-row__video-icon">
       <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" />
     </svg>
   );
@@ -302,6 +302,10 @@ export default function FileBrowser({
     <div className="browser">
       {/* Header */}
       <header className="browser__header">
+        <div className="browser__brand">
+          <img src="/logo.png" alt="" className="browser__logo" width={32} height={32} />
+          <span className="browser__app-name">Drive Streamer</span>
+        </div>
         {isPhone && breadcrumbs.length > 1 && (
           <button className="browser__back-btn" onClick={navigateBack}>
             ← Back
